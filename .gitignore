@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Test data and temporary files
+data/
+*.backup_*.xlsx
+*.fixed.xlsx
+
+# macOS system files
+.DS_Store
