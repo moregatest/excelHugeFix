@@ -413,8 +413,17 @@ def analyze_excel(file_path, fix_issues=False):
             if problem_sheets:
                 logger.info(f"發現 {total_issues} 個工作表有尺寸問題:")
                 for sheet_name, analysis in problem_sheets:
-                    wastage = analysis['reported_rows'] - analysis['actual_rows']
-                    logger.info(f"  • {sheet_name}: 多了 {wastage:,} 個空白行")
+                    row_wastage = analysis['reported_rows'] - analysis['actual_rows']
+                    col_wastage = analysis['reported_cols'] - analysis['actual_cols']
+                    
+                    if row_wastage > 0 and col_wastage > 0:
+                        logger.info(f"  • {sheet_name}: 多了 {row_wastage:,} 行, {col_wastage} 列")
+                    elif row_wastage > 0:
+                        logger.info(f"  • {sheet_name}: 多了 {row_wastage:,} 個空白行")
+                    elif col_wastage > 0:
+                        logger.info(f"  • {sheet_name}: 多了 {col_wastage} 列")
+                    else:
+                        logger.info(f"  • {sheet_name}: 尺寸異常")
             
             if fix_issues and problem_sheets:
                 logger.info("開始修復問題...")
@@ -498,8 +507,17 @@ def analyze_excel(file_path, fix_issues=False):
             if problem_sheets:
                 logger.info(f"發現 {total_issues} 個工作表有尺寸問題:")
                 for sheet_name, analysis in problem_sheets:
-                    wastage = analysis['reported_rows'] - analysis['actual_rows']
-                    logger.info(f"  • {sheet_name}: 多了 {wastage:,} 個空白行")
+                    row_wastage = analysis['reported_rows'] - analysis['actual_rows']
+                    col_wastage = analysis['reported_cols'] - analysis['actual_cols']
+                    
+                    if row_wastage > 0 and col_wastage > 0:
+                        logger.info(f"  • {sheet_name}: 多了 {row_wastage:,} 行, {col_wastage} 列")
+                    elif row_wastage > 0:
+                        logger.info(f"  • {sheet_name}: 多了 {row_wastage:,} 個空白行")
+                    elif col_wastage > 0:
+                        logger.info(f"  • {sheet_name}: 多了 {col_wastage} 列")
+                    else:
+                        logger.info(f"  • {sheet_name}: 尺寸異常")
             
             if fix_issues and problem_sheets:
                 logger.info("開始修復問題...")
