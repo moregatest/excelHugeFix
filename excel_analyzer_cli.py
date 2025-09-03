@@ -23,7 +23,64 @@ from datetime import datetime
 from loguru import logger
 import openpyxl
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 import xlrd
+
+# 定義顏色調色板
+COLOR_PALETTES = [
+    {
+        "name": "PurpleDream",
+        "sheet_tab_color": "6A0DAD",  # Purple
+        "row1_fill": "FFEEF9",      # Light Pinkish Purple
+        "row1_font": "6A0DAD",      # Purple
+        "row2_fill": "6A0DAD",      # Purple
+        "row2_font": "FFFFFF",      # White
+    },
+    {
+        "name": "TealOcean",
+        "sheet_tab_color": "00796B", # Teal
+        "row1_fill": "E0F7FA",      # Light Cyan
+        "row1_font": "00796B",      # Teal
+        "row2_fill": "00796B",      # Teal
+        "row2_font": "FFFFFF",      # White
+    },
+    {
+        "name": "SunnyLime",
+        "sheet_tab_color": "AFB42B", # Lime Dark
+        "row1_fill": "FFF9C4",      # Light Yellow
+        "row1_font": "AFB42B",      # Lime Dark
+        "row2_fill": "AFB42B",      # Lime Dark
+        "row2_font": "FFFFFF",      # White
+    },
+    {
+        "name": "ForestShade",
+        "sheet_tab_color": "33691E", # Green Dark
+        "row1_fill": "F1F8E9",      # Light Green
+        "row1_font": "33691E",      # Green Dark
+        "row2_fill": "33691E",      # Green Dark
+        "row2_font": "FFFFFF",      # White
+    },
+    {
+        "name": "RubyRed",
+        "sheet_tab_color": "C62828", # Red Dark
+        "row1_fill": "FFEBEE",      # Light Red
+        "row1_font": "C62828",      # Red Dark
+        "row2_fill": "C62828",      # Red Dark
+        "row2_font": "FFFFFF",      # White
+    },
+]
+
+# 定義儲存格格式設定
+HEADER_STYLE = {
+    "height": 19,  # 19px高度
+    "alignment": Alignment(horizontal="center", vertical="top", wrap_text=True)
+}
+
+# 一般儲存格樣式
+REGULAR_CELL_STYLE = {
+    "height": 19,  # 19px高度
+    "alignment": Alignment(vertical="top", wrap_text=True)
+}
 
 def analyze_sheet_size(sheet):
     """分析工作表的尺寸問題 (openpyxl工作表)"""
@@ -33,27 +90,63 @@ def analyze_sheet_size(sheet):
     cell_count = 0
     non_empty_cells = 0
     
-    # 掃描前1000行來找實際內容（避免掃描時間過長）
-    scan_limit = min(1000, sheet.max_row)
+    # 智慧掃描策略：先快速掃描找到大概範圍，再精確掃描
+    reported_rows = sheet.max_row
+    reported_cols = sheet.max_column
     
+    # 如果報告的行數不大，直接全掃描
+    if reported_rows <= 2000:
+        scan_limit = reported_rows
+    else:
+        # 對於大檔案，採用分段掃描策略
+        # 1. 先掃描前1000行找基本內容
+        # 2. 從後往前掃描找最後有內容的行
+        scan_limit = min(1000, reported_rows)
+        
+        # 從後往前掃描最後500行，找實際結束位置
+        reverse_scan_start = max(reported_rows - 500, scan_limit + 1)
+        for row_idx in range(reported_rows, reverse_scan_start - 1, -1):
+            has_content = False
+            for col_idx in range(1, min(reported_cols + 1, 100)):
+                try:
+                    cell = sheet.cell(row=row_idx, column=col_idx)
+                    if cell.value is not None and str(cell.value).strip():
+                        actual_max_row = max(actual_max_row, row_idx)
+                        has_content = True
+                        break
+                except:
+                    continue
+            if has_content:
+                break
+    
+    # 掃描前面部分或全部內容
     for row_idx in range(1, scan_limit + 1):
-        for col_idx in range(1, min(sheet.max_column + 1, 100)):  # 限制列數掃描
-            cell = sheet.cell(row=row_idx, column=col_idx)
-            cell_count += 1
-            
-            if cell.value is not None and str(cell.value).strip():
-                non_empty_cells += 1
-                actual_max_row = max(actual_max_row, row_idx)
-                actual_max_col = max(actual_max_col, col_idx)
+        for col_idx in range(1, min(reported_cols + 1, 100)):  # 限制列數掃描
+            try:
+                cell = sheet.cell(row=row_idx, column=col_idx)
+                cell_count += 1
+                
+                if cell.value is not None and str(cell.value).strip():
+                    non_empty_cells += 1
+                    actual_max_row = max(actual_max_row, row_idx)
+                    actual_max_col = max(actual_max_col, col_idx)
+            except:
+                continue
+    
+    # 如果沒有找到實際內容，可能是空工作表
+    if actual_max_row == 0:
+        actual_max_row = 1  # 至少保留標題行
+    if actual_max_col == 0:
+        actual_max_col = 1
     
     return {
-        'reported_rows': sheet.max_row,
-        'reported_cols': sheet.max_column,
+        'reported_rows': reported_rows,
+        'reported_cols': reported_cols,
         'actual_rows': actual_max_row,
         'actual_cols': actual_max_col,
         'scanned_cells': cell_count,
         'non_empty_cells': non_empty_cells,
-        'has_size_issue': (sheet.max_row > actual_max_row * 5 and sheet.max_row > 100) or (sheet.max_column > actual_max_col * 5 and sheet.max_column > 50)  # 檢測行和列的異常
+        'has_size_issue': (reported_rows > actual_max_row * 5 and reported_rows > 100) or (reported_cols > actual_max_col * 5 and reported_cols > 50)  # 檢測行和列的異常
     }
 
 def analyze_xls_sheet_size(sheet):
@@ -64,11 +157,36 @@ def analyze_xls_sheet_size(sheet):
     cell_count = 0
     non_empty_cells = 0
     
-    # 掃描前1000行來找實際內容（避免掃描時間過長）
-    scan_limit = min(1000, sheet.nrows)
+    # 智慧掃描策略：先快速掃描找到大概範圍，再精確掃描
+    reported_rows = sheet.nrows
+    reported_cols = sheet.ncols
     
+    # 如果報告的行數不大，直接全掃描
+    if reported_rows <= 2000:
+        scan_limit = reported_rows
+    else:
+        # 對於大檔案，採用分段掃描策略
+        scan_limit = min(1000, reported_rows)
+        
+        # 從後往前掃描最後500行，找實際結束位置
+        reverse_scan_start = max(reported_rows - 500, scan_limit)
+        for row_idx in range(reported_rows - 1, reverse_scan_start - 1, -1):
+            has_content = False
+            for col_idx in range(0, min(reported_cols, 100)):
+                try:
+                    cell_value = sheet.cell_value(row_idx, col_idx)
+                    if cell_value is not None and str(cell_value).strip():
+                        actual_max_row = max(actual_max_row, row_idx + 1)  # 轉換為1-based索引
+                        has_content = True
+                        break
+                except IndexError:
+                    continue
+            if has_content:
+                break
+    
+    # 掃描前面部分或全部內容
     for row_idx in range(0, scan_limit):
-        for col_idx in range(0, min(sheet.ncols, 100)):  # 限制列數掃描
+        for col_idx in range(0, min(reported_cols, 100)):  # 限制列數掃描
             cell_count += 1
             try:
                 cell_value = sheet.cell_value(row_idx, col_idx)
@@ -79,14 +197,20 @@ def analyze_xls_sheet_size(sheet):
             except IndexError:
                 continue
     
+    # 如果沒有找到實際內容，可能是空工作表
+    if actual_max_row == 0:
+        actual_max_row = 1  # 至少保留標題行
+    if actual_max_col == 0:
+        actual_max_col = 1
+    
     return {
-        'reported_rows': sheet.nrows,
-        'reported_cols': sheet.ncols,
+        'reported_rows': reported_rows,
+        'reported_cols': reported_cols,
         'actual_rows': actual_max_row,
         'actual_cols': actual_max_col,
         'scanned_cells': cell_count,
         'non_empty_cells': non_empty_cells,
-        'has_size_issue': (sheet.nrows > actual_max_row * 5 and sheet.nrows > 100) or (sheet.ncols > actual_max_col * 5 and sheet.ncols > 50)
+        'has_size_issue': (reported_rows > actual_max_row * 5 and reported_rows > 100) or (reported_cols > actual_max_col * 5 and reported_cols > 50)
     }
 
 def convert_xls_to_xlsx(xls_path):
@@ -131,8 +255,8 @@ def backup_file(original_path):
     shutil.copy2(original_path, backup_path)
     return backup_path
 
-def fix_sheet_by_copy(workbook, sheet_name, actual_rows, actual_cols):
-    """透過複製資料修復工作表尺寸問題"""
+def fix_sheet_by_copy(workbook, sheet_name, actual_rows, actual_cols, apply_styling=True, palette_index=0):
+    """透過複製資料修復工作表尺寸問題並應用風格化"""
     old_sheet = workbook[sheet_name]
     
     # 確保至少複製基本行列數
@@ -142,8 +266,35 @@ def fix_sheet_by_copy(workbook, sheet_name, actual_rows, actual_cols):
     # 建立新工作表
     new_sheet = workbook.create_sheet(f"{sheet_name}_fixed")
     
+    # 選擇顏色調色板
+    if apply_styling:
+        palette = COLOR_PALETTES[palette_index % len(COLOR_PALETTES)]
+        
+        # 設定工作表標籤顏色
+        new_sheet.sheet_properties.tabColor = palette["sheet_tab_color"]
+        
+        # 定義樣式
+        # 第一行樣式
+        row1_font = Font(color=palette["row1_font"])
+        row1_fill = PatternFill(start_color=palette["row1_fill"], 
+                               end_color=palette["row1_fill"], 
+                               fill_type="solid")
+        
+        # 第二行樣式
+        row2_font = Font(color=palette["row2_font"], bold=True)
+        row2_fill = PatternFill(start_color=palette["row2_fill"], 
+                               end_color=palette["row2_fill"], 
+                               fill_type="solid")
+    
     # 複製實際有內容的資料
     for row_idx in range(1, safe_rows + 1):
+        # 設定行高
+        if apply_styling:
+            if row_idx <= 2:  # 標題行
+                new_sheet.row_dimensions[row_idx].height = HEADER_STYLE["height"]
+            else:  # 資料行
+                new_sheet.row_dimensions[row_idx].height = REGULAR_CELL_STYLE["height"]
+        
         for col_idx in range(1, safe_cols + 1):
             try:
                 old_cell = old_sheet.cell(row=row_idx, column=col_idx)
@@ -152,14 +303,35 @@ def fix_sheet_by_copy(workbook, sheet_name, actual_rows, actual_cols):
                 # 複製值
                 new_cell.value = old_cell.value
                 
-                # 複製基本格式
-                if hasattr(old_cell, 'font') and old_cell.font and old_cell.font.bold:
-                    new_cell.font = openpyxl.styles.Font(bold=True)
-                if hasattr(old_cell, 'alignment') and old_cell.alignment and old_cell.alignment.horizontal:
-                    new_cell.alignment = openpyxl.styles.Alignment(horizontal=old_cell.alignment.horizontal)
+                # 應用風格化或複製原有格式
+                if apply_styling:
+                    if row_idx == 1:  # 第一行 - 淡色背景樣式
+                        new_cell.font = row1_font
+                        new_cell.fill = row1_fill
+                        new_cell.alignment = HEADER_STYLE["alignment"]
+                    elif row_idx == 2:  # 第二行 - 深色背景樣式
+                        new_cell.font = row2_font
+                        new_cell.fill = row2_fill
+                        new_cell.alignment = HEADER_STYLE["alignment"]
+                    else:  # 其他行 - 一般樣式
+                        new_cell.alignment = REGULAR_CELL_STYLE["alignment"]
+                else:
+                    # 複製原有基本格式
+                    if hasattr(old_cell, 'font') and old_cell.font:
+                        if old_cell.font.bold:
+                            new_cell.font = Font(bold=True)
+                    if hasattr(old_cell, 'alignment') and old_cell.alignment:
+                        if old_cell.alignment.horizontal:
+                            new_cell.alignment = Alignment(horizontal=old_cell.alignment.horizontal)
             except Exception as e:
                 # 如果某個儲存格複製失敗，跳過並繼續
                 continue
+    
+    # 調整欄寬
+    if apply_styling:
+        for col in range(1, safe_cols + 1):
+            col_letter = get_column_letter(col)
+            new_sheet.column_dimensions[col_letter].width = 15
     
     # 獲取原工作表位置
     old_index = workbook.sheetnames.index(sheet_name)
@@ -257,9 +429,11 @@ def analyze_excel(file_path, fix_issues=False):
                 logger.info(f"已建立備份: {backup_path.name}")
                 
                 # 修復問題工作表
+                palette_idx = 0
                 for sheet_name, analysis in problem_sheets:
                     logger.info(f"修復 {sheet_name}...")
-                    fix_sheet_by_copy(workbook, sheet_name, analysis['actual_rows'], analysis['actual_cols'])
+                    fix_sheet_by_copy(workbook, sheet_name, analysis['actual_rows'], analysis['actual_cols'], True, palette_idx)
+                    palette_idx += 1
                 
                 # 儲存修復後的檔案
                 fixed_path = excel_path.with_suffix('.fixed.xlsx')
@@ -335,9 +509,11 @@ def analyze_excel(file_path, fix_issues=False):
                 logger.info(f"已建立備份: {backup_path.name}")
                 
                 # 修復問題工作表
+                palette_idx = 0
                 for sheet_name, analysis in problem_sheets:
                     logger.info(f"修復 {sheet_name}...")
-                    fix_sheet_by_copy(workbook, sheet_name, analysis['actual_rows'], analysis['actual_cols'])
+                    fix_sheet_by_copy(workbook, sheet_name, analysis['actual_rows'], analysis['actual_cols'], True, palette_idx)
+                    palette_idx += 1
                 
                 # 儲存修復後的檔案
                 fixed_path = excel_path.with_suffix('.fixed.xlsx')
